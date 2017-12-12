@@ -1,11 +1,20 @@
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
+using System;
+//using System.Threading.Tasks;
 
 
 public class AI : MonoBehaviour {
+    public Vector3 externalBlinkyPos;
+    public Vector3 internalDir;
+    public Vector3 internalTargetPos;
+    public Vector3 ambushVector;
+    public Dictionary<String, bool> ghostFlags = new Dictionary<string, bool>();
+    public Dictionary<String, TileManager.Tile> ghostTargets = new Dictionary<string, TileManager.Tile>();
 
-	public Transform target;
+    public Transform target;
 
 	private List<TileManager.Tile> tiles = new List<TileManager.Tile>();
 	private TileManager manager;
@@ -17,7 +26,20 @@ public class AI : MonoBehaviour {
 
 	void Awake()
 	{
-		manager = GameObject.Find("Game Manager").GetComponent<TileManager>();
+        Debug.Log("awaken!");
+        ghostFlags.Add("inky", false);
+        ghostFlags.Add("blinky", false);
+        ghostFlags.Add("pinky", false);
+        ghostFlags.Add("clyde", false);
+        ghostTargets.Add("inky", null);
+        ghostTargets.Add("blinky", null);
+        ghostTargets.Add("pinky", null);
+        ghostTargets.Add("clyde", null);
+
+        Thread newThread = new Thread(this.ghostChecker);
+        newThread.Start(name);
+
+        manager = GameObject.Find("Game Manager").GetComponent<TileManager>();
 		tiles = manager.tiles;
 
 		if(ghost == null)	Debug.Log ("game object ghost not found");
@@ -26,8 +48,9 @@ public class AI : MonoBehaviour {
 
 	public void AILogic()
 	{
-		// get current tile
-		Vector3 currentPos = new Vector3(transform.position.x + 0.499f, transform.position.y + 0.499f);
+
+        // get current tile
+        Vector3 currentPos = new Vector3(transform.position.x + 0.499f, transform.position.y + 0.499f);
 		currentTile = tiles[manager.Index ((int)currentPos.x, (int)currentPos.y)];
 		
 		targetTile = GetTargetTilePerGhost();
@@ -43,9 +66,9 @@ public class AI : MonoBehaviour {
 			//---------------------
 			// IF WE BUMP INTO WALL
 			if(nextTile.occupied && !currentTile.isIntersection)
-			{
-				// if ghost moves to right or left and there is wall next tile
-				if(ghost.direction.x != 0)
+            {
+                // if ghost moves to right or left and there is wall next tile
+                if (ghost.direction.x != 0)
 				{
 					if(currentTile.down == null)	ghost.direction = Vector3.up;
 					else 							ghost.direction = Vector3.down;
@@ -143,7 +166,7 @@ public class AI : MonoBehaviour {
 				if(currentTile.left != null && !currentTile.left.occupied && !(ghost.direction.x > 0)) 		availableTiles.Add (currentTile.left);
 				if(currentTile.right != null && !currentTile.right.occupied && !(ghost.direction.x < 0))	availableTiles.Add (currentTile.right);
 
-				int rand = Random.Range(0, availableTiles.Count);
+				int rand = UnityEngine.Random.Range(0, availableTiles.Count);
 				chosenTile = availableTiles[rand];
 				ghost.direction = Vector3.Normalize(new Vector3(chosenTile.x - currentTile.x, chosenTile.y - currentTile.y, 0));
 				//Debug.Log (ghost.name + ": Chosen Tile (" + chosenTile.x + ", " + chosenTile.y + ")" );
@@ -160,48 +183,110 @@ public class AI : MonoBehaviour {
 
 
 	TileManager.Tile GetTargetTilePerGhost()
-	{
-		Vector3 targetPos;
-		TileManager.Tile targetTile;
-		Vector3 dir;
+    {
+        externalBlinkyPos = GameObject.Find("blinky").transform.position;
+        ghostFlags[name] = true;
+        internalDir = target.GetComponent<PlayerController>().getDir();
+        internalTargetPos = new Vector3(target.position.x + 0.499f, target.position.y + 0.499f);
+        ambushVector = target.position + 2 * internalDir - externalBlinkyPos;
 
-		// get the target tile position (round it down to int so we can reach with Index() function)
-		switch(name)
-		{
-		case "blinky":	// target = pacman
-			targetPos = new Vector3 (target.position.x+0.499f, target.position.y+0.499f);
-			targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
-			break;
-		case "pinky":	// target = pacman + 4*pacman's direction (4 steps ahead of pacman)
-			dir = target.GetComponent<PlayerController>().getDir();
-			targetPos = new Vector3 (target.position.x+0.499f, target.position.y+0.499f) + 4*dir;
+        Debug.Log("started waiting on thread.");
+        while (ghostFlags[name] && (GameManager.gameState != GameManager.GameState.Dead)) Debug.Log("gamestate: " + GameManager.gameState);
 
-			// if pacmans going up, not 4 ahead but 4 up and 4 left is the target
-			// read about it here: http://gameinternals.com/post/2072558330/understanding-pac-man-ghost-behavior
-			// so subtract 4 from X coord from target position
-			if(dir == Vector3.up)	targetPos -= new Vector3(4, 0, 0);
+        return ghostTargets[name];
 
-			targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
-			break;
-		case "inky":	// target = ambushVector(pacman+2 - blinky) added to pacman+2
-			dir = target.GetComponent<PlayerController>().getDir();
-			Vector3 blinkyPos = GameObject.Find ("blinky").transform.position;
-			Vector3 ambushVector = target.position + 2*dir - blinkyPos ;
-			targetPos = new Vector3 (target.position.x+0.499f, target.position.y+0.499f) + 2*dir + ambushVector;
-			targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
-			break;
-		case "clyde":
-			targetPos = new Vector3 (target.position.x+0.499f, target.position.y+0.499f);
-			targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
-			if(manager.distance(targetTile, currentTile) < 9)
-				targetTile = tiles[manager.Index (0, 2)];
-			break;
-		default:
-			targetTile = null;
-			Debug.Log ("TARGET TILE NOT ASSIGNED");
-			break;
-		
-		}
-		return targetTile;
-	}
+        /*
+        Vector3 targetPos;
+        TileManager.Tile targetTile;
+        Vector3 dir;
+
+        // get the target tile position (round it down to int so we can reach with Index() function)
+        switch (name)
+        {
+            case "blinky":  // target = pacman
+                targetPos = new Vector3(target.position.x + 0.499f, target.position.y + 0.499f);
+                targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
+                break;
+            case "pinky":   // target = pacman + 4*pacman's direction (4 steps ahead of pacman)
+                dir = target.GetComponent<PlayerController>().getDir();
+                targetPos = new Vector3(target.position.x + 0.499f, target.position.y + 0.499f) + 4 * dir;
+
+                // if pacmans going up, not 4 ahead but 4 up and 4 left is the target
+                // read about it here: http://gameinternals.com/post/2072558330/understanding-pac-man-ghost-behavior
+                // so subtract 4 from X coord from target position
+                if (dir == Vector3.up) targetPos -= new Vector3(4, 0, 0);
+
+                targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
+                break;
+            case "inky":    // target = ambushVector(pacman+2 - blinky) added to pacman+2
+                dir = target.GetComponent<PlayerController>().getDir();
+                Vector3 blinkyPos = GameObject.Find("blinky").transform.position;
+                Vector3 ambushVector = target.position + 2 * dir - blinkyPos;
+                targetPos = new Vector3(target.position.x + 0.499f, target.position.y + 0.499f) + 2 * dir + ambushVector;
+                targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
+                break;
+            case "clyde":
+                targetPos = new Vector3(target.position.x + 0.499f, target.position.y + 0.499f);
+                targetTile = tiles[manager.Index((int)targetPos.x, (int)targetPos.y)];
+                if (manager.distance(targetTile, currentTile) < 9)
+                    targetTile = tiles[manager.Index(0, 2)];
+                break;
+            default:
+                targetTile = null;
+                Debug.Log("TARGET TILE NOT ASSIGNED");
+                break;
+
+        }
+        return targetTile;*/
+    }
+
+    public void ghostChecker(object myName)
+    {
+        string innerName = (string)myName;
+        TileManager.Tile internalTargetTile;
+        GameManager.GameState gameRunning = GameManager.gameState;
+
+        Debug.Log("Ghostchecker " + innerName + " started.");
+
+        while (gameRunning != GameManager.GameState.Dead)
+        {
+            Debug.Log("gamestate: " + gameRunning.ToString());
+            while (!ghostFlags[innerName] && (gameRunning != GameManager.GameState.Dead)) Debug.Log("gamestate: " + GameManager.gameState);
+            // get the target tile position (round it down to int so we can reach with Index() function)
+            switch (innerName)
+            {
+                case "blinky":  // target = pacman
+                    internalTargetTile = tiles[manager.Index((int)internalTargetPos.x, (int)internalTargetPos.y)];
+                    break;
+                case "pinky":   // target = pacman + 4*pacman's direction (4 steps ahead of pacman)
+                    //internalDir = target.GetComponent<PlayerController>().getDir();
+                    internalTargetPos = internalTargetPos + 4 * internalDir;
+
+                    // if pacmans going up, not 4 ahead but 4 up and 4 left is the target
+                    // read about it here: http://gameinternals.com/post/2072558330/understanding-pac-man-ghost-behavior
+                    // so subtract 4 from X coord from target position
+                    if (internalDir == Vector3.up) internalTargetPos -= new Vector3(4, 0, 0);
+
+                    internalTargetTile = tiles[manager.Index((int)internalTargetPos.x, (int)internalTargetPos.y)];
+                    break;
+                case "inky":    // target = ambushVector(pacman+2 - blinky) added to pacman+2
+                    //internalDir = target.GetComponent<PlayerController>().getDir();
+                    Vector3 blinkyPos = externalBlinkyPos;
+                    internalTargetPos = internalTargetPos + 2 * internalDir + ambushVector;
+                    internalTargetTile = tiles[manager.Index((int)internalTargetPos.x, (int)internalTargetPos.y)];
+                    break;
+                case "clyde":
+                    internalTargetTile = tiles[manager.Index((int)internalTargetPos.x, (int)internalTargetPos.y)];
+                    if (manager.distance(internalTargetTile, currentTile) < 9)
+                        internalTargetTile = tiles[manager.Index(0, 2)];
+                    break;
+                default:
+                    internalTargetTile = null;
+                    Debug.Log("TARGET TILE NOT ASSIGNED");
+                    break;
+            }
+            ghostTargets[innerName] = internalTargetTile;
+            ghostFlags[innerName] = false;
+        }
+    }
 }
